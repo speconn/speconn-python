@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "speconn-python"
+name = "speconn"
 version = "0.1.0"
 description = "Python runtime for Speconn RPC"
 requires-python = ">=3.11"
