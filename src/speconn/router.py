@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import dataclasses
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Protocol
 
 from .envelope import encode_envelope, FLAG_END_STREAM
 from .error import Code, SpeconnError
@@ -34,23 +34,93 @@ async def _read_body(receive: Callable) -> bytes:
     return body
 
 
-async def _send_error(send: Callable, code: Code, message: str) -> None:
-    status = code.http_status()
-    body = json.dumps({"code": code.as_str(), "message": message}).encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": status,
-            "headers": [[b"content-type", b"application/json"]],
-        }
-    )
+async def _send_response(
+    send: Callable,
+    status: int,
+    headers: list[tuple[bytes, bytes]],
+    body: bytes,
+) -> None:
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": headers,
+    })
     await send({"type": "http.response.body", "body": body})
 
 
+async def _send_error(send: Callable, code: Code, message: str, extra_headers: list[tuple[bytes, bytes]] | None = None) -> None:
+    status = code.http_status()
+    body = json.dumps({"code": code.as_str(), "message": message}).encode()
+    headers = [*[b"content-type", b"application/json"]],
+    if extra_headers:
+        headers = extra_headers + headers
+    await _send_response(send, status, headers, body)
+
+
+@dataclasses.dataclass
+class SpeconnRequest:
+    path: str
+    headers: dict[str, str]
+    body: Any
+    content_type: str
+    values: dict[str, Any]
+
+
+@dataclasses.dataclass
+class SpeconnResponse:
+    status: int
+    headers: dict[str, str]
+    body: Any
+
+
+class Interceptor(Protocol):
+    async def before(self, req: SpeconnRequest) -> None: ...
+    async def after(self, req: SpeconnRequest, resp: SpeconnResponse) -> None: ...
+
+
+class CORSInterceptor:
+    def __init__(
+        self,
+        allow_origin: str = "*",
+        allow_methods: str = "POST, OPTIONS",
+        allow_headers: str = "Content-Type, Connect-Protocol-Version, Authorization",
+        max_age: str = "86400",
+    ) -> None:
+        self.allow_origin = allow_origin
+        self.allow_methods = allow_methods
+        self.allow_headers = allow_headers
+        self.max_age = max_age
+
+    async def before(self, req: SpeconnRequest) -> None:
+        pass
+
+    async def after(self, req: SpeconnRequest, resp: SpeconnResponse) -> None:
+        resp.headers["access-control-allow-origin"] = self.allow_origin
+        resp.headers["access-control-allow-methods"] = self.allow_methods
+        resp.headers["access-control-allow-headers"] = self.allow_headers
+        resp.headers["access-control-max-age"] = self.max_age
+
+
+class AuthInterceptor:
+    async def before(self, req: SpeconnRequest) -> None:
+        auth = req.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            user = auth[7:]
+            req.values["user"] = user
+            if isinstance(req.body, dict):
+                req.body["_user"] = user
+            else:
+                req.body = {"_user": user}
+
+    async def after(self, req: SpeconnRequest, resp: SpeconnResponse) -> None:
+        pass
+
+
 class SpeconnRouter:
-    def __init__(self) -> None:
+    def __init__(self, interceptors: list[Interceptor] | None = None) -> None:
         self._unary: dict[str, tuple[type, type, Callable]] = {}
         self._streams: dict[str, tuple[type, type, Callable]] = {}
+        self._interceptors: list[Interceptor] = interceptors or []
 
     def unary(self, path: str, req_type: type, res_type: type) -> Callable:
         def decorator(fn: Callable) -> Callable:
@@ -74,89 +144,110 @@ class SpeconnRouter:
 
         path = scope.get("path", "")
         ct = ""
+        req_headers: dict[str, str] = {}
         for k, v in scope.get("headers", []):
+            decoded_key = k.decode()
+            req_headers[decoded_key] = v.decode()
             if k == b"content-type":
                 ct = v.decode()
-                break
+
+        if scope.get("method") == "OPTIONS":
+            opts_headers: list[tuple[bytes, bytes]] = [
+                [b"access-control-allow-origin", b"*"],
+                [b"access-control-allow-methods", b"POST, OPTIONS"],
+                [b"access-control-allow-headers", b"Content-Type, Connect-Protocol-Version, Authorization"],
+                [b"access-control-max-age", b"86400"],
+            ]
+            await _send_response(send, 204, opts_headers, b"")
+            return
 
         body = await _read_body(receive)
+        data = json.loads(body) if body else {}
+
+        speconn_req = SpeconnRequest(
+            path=path,
+            headers=req_headers,
+            body=data,
+            content_type=ct,
+            values={},
+        )
+
+        for interceptor in self._interceptors:
+            try:
+                result = interceptor.before(speconn_req)
+                if isinstance(result, Awaitable):
+                    await result
+            except SpeconnError as e:
+                await _send_error(send, e.code, e.message)
+                return
+            except Exception as e:
+                await _send_error(send, Code.INTERNAL, str(e))
+                return
+
         is_stream = "connect+json" in ct
 
-        if is_stream and path in self._streams:
-            req_type, _res_type, fn = self._streams[path]
-            await self._handle_stream(req_type, fn, body, send)
-        elif path in self._unary:
-            req_type, _res_type, fn = self._unary[path]
-            await self._handle_unary(fn, req_type, body, send)
-        else:
-            await _send_error(send, Code.NOT_FOUND, f"no route: {path}")
+        resp_headers: dict[str, str] = {}
+        status: int = 200
+        resp_content_type: str = "application/json"
+        resp_body: bytes = b""
 
-    async def _handle_unary(
-        self, fn: Callable, req_type: type, body: bytes, send: Callable
-    ) -> None:
         try:
-            data = json.loads(body) if body else {}
-            req = _instantiate(req_type, data)
-            result = fn(req)
-            if isinstance(result, Awaitable):
-                result = await result
-            res_body = json.dumps(_to_dict(result)).encode()
-            await send(
-                {
-                    "type": "http.response.start",
-                    "status": 200,
-                    "headers": [[b"content-type", b"application/json"]],
-                }
-            )
-            await send({"type": "http.response.body", "body": res_body})
+            if is_stream and speconn_req.path in self._streams:
+                req_type, _res_type, fn = self._streams[speconn_req.path]
+                resp_content_type = "application/connect+json"
+                chunks: list[bytes] = []
+
+                req_obj = _instantiate(req_type, speconn_req.body)
+                emit = lambda msg: chunks.append(  # noqa: E731
+                    encode_envelope(0, json.dumps(_to_dict(msg)).encode())
+                )
+
+                stream_result = fn(req_obj, emit)
+                if isinstance(stream_result, Awaitable):
+                    await stream_result
+
+                trailer = json.dumps({}).encode()
+                chunks.append(encode_envelope(FLAG_END_STREAM, trailer))
+                resp_body = b"".join(chunks)
+            elif speconn_req.path in self._unary:
+                req_type, _res_type, fn = self._unary[speconn_req.path]
+                req_obj = _instantiate(req_type, speconn_req.body)
+                result = fn(req_obj)
+                if isinstance(result, Awaitable):
+                    result = await result
+                resp_body = json.dumps(_to_dict(result)).encode()
+            else:
+                await _send_error(send, Code.NOT_FOUND, f"no route: {speconn_req.path}")
+                return
         except SpeconnError as e:
-            await _send_error(send, e.code, e.message)
+            if is_stream:
+                trailer = json.dumps({"error": {"code": e.code.as_str(), "message": e.message}}).encode()
+                resp_body = encode_envelope(FLAG_END_STREAM, trailer)
+            else:
+                await _send_error(send, e.code, e.message)
+                return
         except Exception as e:
-            await _send_error(send, Code.INTERNAL, str(e))
+            if is_stream:
+                trailer = json.dumps({"error": {"code": "internal", "message": str(e)}}).encode()
+                resp_body = encode_envelope(FLAG_END_STREAM, trailer)
+            else:
+                await _send_error(send, Code.INTERNAL, str(e))
+                return
 
-    async def _handle_stream(
-        self, req_type: type, fn: Callable, body: bytes, send: Callable
-    ) -> None:
-        chunks: list[bytes] = []
-        try:
-            data = json.loads(body) if body else {}
-            req = _instantiate(req_type, data)
-            await send(
-                {
-                    "type": "http.response.start",
-                    "status": 200,
-                    "headers": [[b"content-type", b"application/connect+json"]],
-                }
-            )
+        speconn_resp = SpeconnResponse(
+            status=status,
+            headers=resp_headers,
+            body=None,
+        )
 
-            def emit(msg: object) -> None:
-                payload = json.dumps(_to_dict(msg)).encode()
-                chunks.append(encode_envelope(0, payload))
-
-            result = fn(req, emit)
+        for interceptor in self._interceptors:
+            result = interceptor.after(speconn_req, speconn_resp)
             if isinstance(result, Awaitable):
                 await result
 
-            trailer = json.dumps({}).encode()
-            chunks.append(encode_envelope(FLAG_END_STREAM, trailer))
-            await send({"type": "http.response.body", "body": b"".join(chunks)})
-        except SpeconnError as e:
-            trailer = json.dumps(
-                {"error": {"code": e.code.as_str(), "message": e.message}}
-            ).encode()
-            payload = (
-                b"".join(chunks) + encode_envelope(FLAG_END_STREAM, trailer)
-                if chunks
-                else encode_envelope(FLAG_END_STREAM, trailer)
-            )
-            await send({"type": "http.response.body", "body": payload})
-        except Exception as e:
-            trailer = json.dumps(
-                {"error": {"code": "internal", "message": str(e)}}
-            ).encode()
-            await send(
-                {
-                    "type": "http.response.body",
-                    "body": encode_envelope(FLAG_END_STREAM, trailer),
-                }
-            )
+        final_headers: list[tuple[bytes, bytes]] = []
+        for k, v in speconn_resp.headers.items():
+            final_headers.append([k.encode(), v.encode()])
+        final_headers.append([b"content-type", resp_content_type.encode()])
+
+        await _send_response(send, speconn_resp.status, final_headers, resp_body)

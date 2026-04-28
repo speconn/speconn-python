@@ -6,7 +6,7 @@ from .error import Code, SpeconnError, CODE_TO_STATUS
 from .envelope import FLAG_COMPRESSED, FLAG_END_STREAM, encode_envelope, decode_envelope
 from .transport import Transport, TransportResponse, PyreqwestTransport, HttpxTransport
 from .client import SpeconnClient
-from .router import SpeconnRouter
+from .router import SpeconnRouter, SpeconnRequest, SpeconnResponse, Interceptor, CORSInterceptor, AuthInterceptor
 
 __all__ = [
     "Code",
@@ -22,4 +22,9 @@ __all__ = [
     "HttpxTransport",
     "SpeconnClient",
     "SpeconnRouter",
+    "SpeconnRequest",
+    "SpeconnResponse",
+    "Interceptor",
+    "CORSInterceptor",
+    "AuthInterceptor",
 ]
