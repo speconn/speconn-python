@@ -1,67 +1,54 @@
 from __future__ import annotations
 
-import json
 import dataclasses
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+from typing import Protocol, runtime_checkable
 
 
 @dataclasses.dataclass
-class TransportResponse:
+class HttpRequest:
+    url: str
+    method: str
+    headers: list[tuple[str, str]]
+    body: bytes
+
+
+@dataclasses.dataclass
+class HttpResponse:
     status: int
     body: bytes
 
 
-class Transport(ABC):
+@runtime_checkable
+class HttpClient(Protocol):
+    """HttpClient is the protocol Speconn expects HTTP clients to implement."""
+
     @abstractmethod
-    async def post(
-        self, url: str, content_type: str, body: bytes, headers: dict[str, str]
-    ) -> TransportResponse:
-        ...
+    async def send(self, request: HttpRequest) -> HttpResponse: ...
 
 
-class PyreqwestTransport(Transport):
-    def __init__(self) -> None:
-        from pyreqwest.client import ClientBuilder
+class HttpxHttpClient:
+    """Default HttpClient implementation using httpx."""
 
-        self._client = ClientBuilder().build()
-
-    async def post(
-        self, url: str, content_type: str, body: bytes, headers: dict[str, str]
-    ) -> TransportResponse:
-        builder = self._client.post(url).header("content-type", content_type)
-        for k, v in headers.items():
-            builder = builder.header(k, v)
-        req_obj = json.loads(body) if body else {}
-        resp = await builder.json(req_obj).build().send()
-        raw = await resp.bytes()
-        return TransportResponse(status=resp.status, body=raw)
-
-
-class HttpxTransport(Transport):
-    def __init__(self) -> None:
+    def __init__(self, client=None) -> None:
         import httpx
+        self._client = client or httpx.AsyncClient()
 
-        self._client = httpx.AsyncClient()
+    async def send(self, request: HttpRequest) -> HttpResponse:
+        headers = {k: v for k, v in request.headers}
+        resp = await self._client.request(
+            request.method,
+            request.url,
+            content=request.body,
+            headers=headers,
+        )
+        return HttpResponse(status=resp.status_code, body=resp.content)
 
-    async def post(
-        self, url: str, content_type: str, body: bytes, headers: dict[str, str]
-    ) -> TransportResponse:
-        merged = {"content-type": content_type, **headers}
-        resp = await self._client.post(url, content=body, headers=merged)
-        return TransportResponse(status=resp.status_code, body=resp.content)
 
-
-def _create_default_transport() -> Transport:
-    errors: list[str] = []
+def _create_default_http_client() -> HttpClient:
     try:
-        return PyreqwestTransport()
-    except ImportError as e:
-        errors.append(f"pyreqwest: {e}")
-    try:
-        return HttpxTransport()
-    except ImportError as e:
-        errors.append(f"httpx: {e}")
-    raise ImportError(
-        "No HTTP transport available. Install pyreqwest or httpx.\n"
-        + "\n".join(errors)
-    )
+        return HttpxHttpClient()
+    except ImportError:
+        raise ImportError(
+            "No HTTP client available. Install httpx: pip install httpx"
+        )

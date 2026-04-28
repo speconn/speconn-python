@@ -5,7 +5,7 @@ import dataclasses
 
 from .envelope import decode_envelope, FLAG_END_STREAM
 from .error import Code, SpeconnError
-from .transport import Transport, TransportResponse, _create_default_transport
+from .transport import HttpClient, HttpRequest, HttpResponse, _create_default_http_client
 
 
 def _to_dict(obj: object) -> object:
@@ -22,13 +22,11 @@ def _instantiate(cls: type, data: dict) -> object:
     return data
 
 
-def _parse_error(resp: TransportResponse) -> SpeconnError:
+def _parse_error(resp: HttpResponse) -> SpeconnError:
     try:
         err = json.loads(resp.body)
     except Exception:
-        return SpeconnError(
-            Code.from_http_status(resp.status), f"HTTP {resp.status}"
-        )
+        return SpeconnError(Code.from_http_status(resp.status), f"HTTP {resp.status}")
     return SpeconnError(
         Code.from_str(err.get("code", "unknown")),
         err.get("message", ""),
@@ -36,9 +34,9 @@ def _parse_error(resp: TransportResponse) -> SpeconnError:
 
 
 class SpeconnClient:
-    def __init__(self, base_url: str, transport: Transport | None = None) -> None:
+    def __init__(self, base_url: str, http_client: HttpClient | None = None) -> None:
         self._base_url = base_url.rstrip("/")
-        self._transport = transport or _create_default_transport()
+        self._http_client = http_client or _create_default_http_client()
 
     async def call(
         self,
@@ -50,11 +48,14 @@ class SpeconnClient:
     ) -> object:
         url = self._base_url + path
         body = json.dumps(_to_dict(req) if req else {}).encode()
-        resp = await self._transport.post(url, "application/json", body, headers or {})
-
+        req_headers = [("content-type", "application/json")]
+        if headers:
+            req_headers.extend(headers.items())
+        resp = await self._http_client.send(
+            HttpRequest(url=url, method="POST", headers=req_headers, body=body)
+        )
         if resp.status >= 400:
             raise _parse_error(resp)
-
         data = json.loads(resp.body)
         return _instantiate(res_type, data)
 
@@ -68,24 +69,26 @@ class SpeconnClient:
     ) -> list[object]:
         url = self._base_url + path
         body = json.dumps(_to_dict(req) if req else {}).encode()
-        merged = {"connect-protocol-version": "1", **(headers or {})}
-        resp = await self._transport.post(
-            url, "application/connect+json", body, merged
+        req_headers = [
+            ("content-type", "application/connect+json"),
+            ("connect-protocol-version", "1"),
+        ]
+        if headers:
+            req_headers.extend(headers.items())
+        resp = await self._http_client.send(
+            HttpRequest(url=url, method="POST", headers=req_headers, body=body)
         )
-
         if resp.status >= 400:
             raise _parse_error(resp)
 
         results: list[object] = []
         pos = 0
         buf = resp.body
-
         while pos < len(buf):
             if len(buf) - pos < 5:
                 break
             flags, payload = decode_envelope(buf[pos:])
             pos += 5 + len(payload)
-
             if flags & FLAG_END_STREAM:
                 trailer = json.loads(payload)
                 error = trailer.get("error")
@@ -95,8 +98,6 @@ class SpeconnClient:
                         error.get("message", ""),
                     )
                 break
-
             msg = json.loads(payload)
             results.append(_instantiate(res_type, msg))
-
         return results
