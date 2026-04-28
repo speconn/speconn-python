@@ -5,7 +5,7 @@ import dataclasses
 
 from .envelope import decode_envelope, FLAG_END_STREAM
 from .error import Code, SpeconnError
-from .transport import HttpClient, HttpRequest, HttpResponse, _create_default_http_client
+from .transport import HttpRequest, HttpResponse
 
 
 def _to_dict(obj: object) -> object:
@@ -33,41 +33,33 @@ def _parse_error(resp: HttpResponse) -> SpeconnError:
     )
 
 
-class SpeconnClient:
-    def __init__(self, base_url: str, http_client: HttpClient | None = None) -> None:
-        self._base_url = base_url.rstrip("/")
-        self._http_client = http_client or _create_default_http_client()
+def _create_default_transport():
+    try:
+        from .transport_httpx import HttpxTransport
+        return HttpxTransport()
+    except ImportError:
+        raise ImportError("No HTTP transport available. Install httpx: pip install httpx")
 
-    async def call(
-        self,
-        path: str,
-        req: object,
-        res_type: type,
-        *,
-        headers: dict[str, str] | None = None,
-    ) -> object:
-        url = self._base_url + path
+
+class SpeconnClient:
+    def __init__(self, base_url: str, path: str, transport=None) -> None:
+        self._url = base_url.rstrip("/") + path
+        self._transport = transport or _create_default_transport()
+
+    async def call(self, req: object, res_type: type, *, headers: dict[str, str] | None = None) -> object:
         body = json.dumps(_to_dict(req) if req else {}).encode()
         req_headers = [("content-type", "application/json")]
         if headers:
             req_headers.extend(headers.items())
-        resp = await self._http_client.send(
-            HttpRequest(url=url, method="POST", headers=req_headers, body=body)
+        resp = await self._transport.send(
+            HttpRequest(url=self._url, method="POST", headers=req_headers, body=body)
         )
         if resp.status >= 400:
             raise _parse_error(resp)
         data = json.loads(resp.body)
         return _instantiate(res_type, data)
 
-    async def stream(
-        self,
-        path: str,
-        req: object,
-        res_type: type,
-        *,
-        headers: dict[str, str] | None = None,
-    ) -> list[object]:
-        url = self._base_url + path
+    async def stream(self, req: object, res_type: type, *, headers: dict[str, str] | None = None) -> list[object]:
         body = json.dumps(_to_dict(req) if req else {}).encode()
         req_headers = [
             ("content-type", "application/connect+json"),
@@ -75,8 +67,8 @@ class SpeconnClient:
         ]
         if headers:
             req_headers.extend(headers.items())
-        resp = await self._http_client.send(
-            HttpRequest(url=url, method="POST", headers=req_headers, body=body)
+        resp = await self._transport.send(
+            HttpRequest(url=self._url, method="POST", headers=req_headers, body=body)
         )
         if resp.status >= 400:
             raise _parse_error(resp)

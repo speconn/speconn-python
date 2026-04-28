@@ -20,35 +20,6 @@ class HttpResponse:
 
 
 @runtime_checkable
-class HttpClient(Protocol):
-    """HttpClient is the protocol Speconn expects HTTP clients to implement."""
-
+class SpeconnTransport(Protocol):
     @abstractmethod
     async def send(self, request: HttpRequest) -> HttpResponse: ...
-
-
-class HttpxHttpClient:
-    """Default HttpClient implementation using httpx."""
-
-    def __init__(self, client=None) -> None:
-        import httpx
-        self._client = client or httpx.AsyncClient()
-
-    async def send(self, request: HttpRequest) -> HttpResponse:
-        headers = {k: v for k, v in request.headers}
-        resp = await self._client.request(
-            request.method,
-            request.url,
-            content=request.body,
-            headers=headers,
-        )
-        return HttpResponse(status=resp.status_code, body=resp.content)
-
-
-def _create_default_http_client() -> HttpClient:
-    try:
-        return HttpxHttpClient()
-    except ImportError:
-        raise ImportError(
-            "No HTTP client available. Install httpx: pip install httpx"
-        )
