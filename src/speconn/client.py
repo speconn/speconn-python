@@ -8,6 +8,19 @@ from .error import Code, SpeconnError
 from .transport import Transport, TransportResponse, _create_default_transport
 
 
+@dataclasses.dataclass
+class CallOptions:
+    headers: dict[str, str] = dataclasses.field(default_factory=dict)
+
+
+def with_header(key: str, value: str) -> CallOptions:
+    return CallOptions(headers={key: value})
+
+
+def with_headers(headers: dict[str, str]) -> CallOptions:
+    return CallOptions(headers=headers)
+
+
 def _to_dict(obj: object) -> object:
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return dataclasses.asdict(obj)
@@ -40,10 +53,13 @@ class SpeconnClient:
         self._base_url = base_url.rstrip("/")
         self._transport = transport or _create_default_transport()
 
-    async def call(self, path: str, req: object, res_type: type) -> object:
+    async def call(self, path: str, req: object, res_type: type, *options: CallOptions) -> object:
         url = self._base_url + path
         body = json.dumps(_to_dict(req) if req else {}).encode()
-        resp = await self._transport.post(url, "application/json", body, {})
+        headers: dict[str, str] = {}
+        for opt in options:
+            headers.update(opt.headers)
+        resp = await self._transport.post(url, "application/json", body, headers)
 
         if resp.status >= 400:
             raise _parse_error(resp)
@@ -51,14 +67,17 @@ class SpeconnClient:
         data = json.loads(resp.body)
         return _instantiate(res_type, data)
 
-    async def stream(self, path: str, req: object, res_type: type) -> list[object]:
+    async def stream(self, path: str, req: object, res_type: type, *options: CallOptions) -> list[object]:
         url = self._base_url + path
         body = json.dumps(_to_dict(req) if req else {}).encode()
+        headers: dict[str, str] = {"connect-protocol-version": "1"}
+        for opt in options:
+            headers.update(opt.headers)
         resp = await self._transport.post(
             url,
             "application/connect+json",
             body,
-            {"connect-protocol-version": "1"},
+            headers,
         )
 
         if resp.status >= 400:
