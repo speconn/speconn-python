@@ -1,4 +1,4 @@
-"""Speconn Python runtime — JSON unary + Connect streaming RPC."""
+"""Speconn Python runtime — JSON/MsgPack unary + Connect streaming RPC."""
 
 from __future__ import annotations
 
@@ -8,7 +8,20 @@ from .transport import SpeconnTransport, HttpRequest, HttpResponse
 from .transport_httpx import HttpxTransport
 from .transport_pyqwest import PyqwestTransport
 from .client import SpeconnClient
-from .router import SpeconnRouter, SpeconnContext, SpeconnRequest, SpeconnResponse, Interceptor
+from .router import SpeconnRouter, SpeconnRequest, SpeconnResponse, Interceptor
+from .context import SpeconnContext, create_context, create_context_from_asgi_scope
+from .abort_signal import AbortSignal, create_abort_signal_with_timeout
+from .context_key import ContextKey, set_value, get_value, delete_value, UserKey, RequestIDKey, UserIDKey
+
+from specodec import (
+    SpecCodec,
+    JsonReader,
+    JsonWriter,
+    MsgPackReader,
+    MsgPackWriter,
+    dispatch,
+    respond,
+)
 
 __all__ = [
     "Code",
@@ -23,10 +36,28 @@ __all__ = [
     "HttpResponse",
     "HttpxTransport",
     "PyqwestTransport",
+    "SpecCodec",
+    "JsonReader",
+    "JsonWriter",
+    "MsgPackReader",
+    "MsgPackWriter",
+    "dispatch",
+    "respond",
     "SpeconnClient",
     "SpeconnRouter",
     "SpeconnContext",
     "SpeconnRequest",
     "SpeconnResponse",
     "Interceptor",
+    "AbortSignal",
+    "create_abort_signal_with_timeout",
+    "create_context",
+    "create_context_from_asgi_scope",
+    "ContextKey",
+    "set_value",
+    "get_value",
+    "delete_value",
+    "UserKey",
+    "RequestIDKey",
+    "UserIDKey",
 ]

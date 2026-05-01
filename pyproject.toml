@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "speconn"
-version = "0.1.0"
+version = "0.3.0"
 description = "Python runtime for Speconn RPC"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["specodec @ git+https://github.com/specodec/specodec-python.git@v0.0.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/speconn"]

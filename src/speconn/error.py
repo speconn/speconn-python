@@ -92,3 +92,32 @@ class SpeconnError(Exception):
         self.code = code
         self.message = message
         super().__init__(f"{code.as_str()}: {message}")
+
+    def encode(self, fmt: str) -> bytes:
+        from specodec import respond, SpecCodec, SpecWriter, SpecReader
+        def _enc(w: SpecWriter, obj: "SpeconnError") -> None:
+            w.begin_object(2)
+            w.write_field("code");    w.write_string(obj.code.as_str())
+            w.write_field("message"); w.write_string(obj.message)
+            w.end_object()
+        codec: SpecCodec = SpecCodec(encode=_enc, decode=lambda r: None)
+        return respond(codec, self, fmt).body
+
+    @staticmethod
+    def decode(payload: bytes, fmt: str) -> "SpeconnError":
+        from specodec import dispatch, SpecCodec, SpecReader
+        def _dec(r: SpecReader) -> tuple:
+            code = "unknown"; message = ""
+            r.begin_object()
+            while r.has_next_field():
+                k = r.read_field_name()
+                if k == "code":    code = r.read_string()
+                elif k == "message": message = r.read_string()
+                else: r.skip()
+            r.end_object()
+            return code, message
+        try:
+            code, message = dispatch(SpecCodec(encode=lambda w, o: None, decode=_dec), payload, fmt)
+            return SpeconnError(Code.from_str(code), message)
+        except Exception:
+            return SpeconnError(Code.UNKNOWN, "decode error")
