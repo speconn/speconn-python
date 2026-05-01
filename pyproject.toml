@@ -12,6 +12,9 @@ dependencies = ["specodec @ git+https://github.com/specodec/specodec-python.git@
 [tool.hatch.build.targets.wheel]
 packages = ["src/speconn"]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [project.optional-dependencies]
 pyreqwest = ["pyreqwest"]
 httpx = ["httpx"]
