@@ -16,4 +16,8 @@ class PyqwestTransport:
             content=request.body,
             headers=headers,
         )
-        return HttpResponse(status=resp.status_code, body=resp.content)
+        return HttpResponse(
+            status=resp.status_code,
+            headers=list(resp.headers.items()),
+            body=resp.content,
+        )

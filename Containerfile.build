@@ -4,9 +4,14 @@ COPY src/ src/
 RUN python -m py_compile src/speconn/__init__.py && \
     python -m py_compile src/speconn/error.py && \
     python -m py_compile src/speconn/envelope.py && \
+    python -m py_compile src/speconn/abort_signal.py && \
+    python -m py_compile src/speconn/context.py && \
     python -m py_compile src/speconn/transport.py && \
+    python -m py_compile src/speconn/transport_httpx.py && \
+    python -m py_compile src/speconn/transport_pyqwest.py && \
     python -m py_compile src/speconn/client.py && \
     python -m py_compile src/speconn/router.py && \
+    python -m compileall src/speconn/ && \
     echo "OK"
 
 FROM scratch

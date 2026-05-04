@@ -1,11 +1,63 @@
 from __future__ import annotations
 
+import dataclasses
+from collections.abc import AsyncIterator
+from typing import Generic, TypeVar
+
 from specodec import dispatch, respond, SpecCodec
 
 from .envelope import decode_envelope, FLAG_END_STREAM
 from .error import Code, SpeconnError
 from .transport import HttpRequest, HttpResponse
 
+
+T = TypeVar("T")
+
+
+@dataclasses.dataclass
+class CallOptions:
+    headers: dict[str, str] = dataclasses.field(default_factory=dict)
+    timeout_ms: int | None = None
+
+
+@dataclasses.dataclass
+class Response(Generic[T]):
+    msg: T
+    headers: dict[str, str]
+    trailers: dict[str, str]
+
+
+class StreamResponse(Generic[T]):
+    def __init__(self, headers: dict[str, str]) -> None:
+        self.headers = headers
+        self.trailers: dict[str, str] = {}
+        self._msgs: list[T] = []
+        self._iter_done = False
+
+    def __aiter__(self) -> AsyncIterator[T]:
+        return self._aiter_impl()
+
+    async def _aiter_impl(self) -> AsyncIterator[T]:
+        for msg in self._msgs:
+            yield msg
+        self._iter_done = True
+
+    def _add_msg(self, msg: T) -> None:
+        self._msgs.append(msg)
+
+    def _set_trailers(self, trailers: dict[str, str]) -> None:
+        self.trailers = trailers
+
+
+def _split_headers_trailers(raw_headers: list[tuple[str, str]]) -> tuple[dict[str, str], dict[str, str]]:
+    headers: dict[str, str] = {}
+    trailers: dict[str, str] = {}
+    for k, v in raw_headers:
+        if k.lower().startswith("trailer-"):
+            trailers[k[8:]] = v
+        else:
+            headers[k.lower()] = v
+    return headers, trailers
 
 
 def _parse_error(resp: HttpResponse) -> SpeconnError:
@@ -44,10 +96,9 @@ class SpeconnClient:
         req_codec: SpecCodec,
         req: object,
         res_codec: SpecCodec,
-        *,
-        headers: dict[str, str] | None = None,
-    ) -> object:
-        h = headers or {}
+        options: CallOptions = CallOptions(),
+    ) -> Response[object]:
+        h = options.headers
         req_fmt = _extract_format(_get_content_type(h))
         res_fmt = _extract_format(_get_accept(h))
 
@@ -59,17 +110,19 @@ class SpeconnClient:
         )
         if resp.status >= 400:
             raise _parse_error(resp)
-        return dispatch(res_codec, resp.body, res_fmt)
+
+        headers, trailers = _split_headers_trailers(resp.headers)
+        msg = dispatch(res_codec, resp.body, res_fmt)
+        return Response(msg=msg, headers=headers, trailers=trailers)
 
     async def stream(
         self,
         req_codec: SpecCodec,
         req: object,
         res_codec: SpecCodec,
-        *,
-        headers: dict[str, str] | None = None,
-    ) -> list[object]:
-        h = headers or {}
+        options: CallOptions = CallOptions(),
+    ) -> StreamResponse[object]:
+        h = options.headers.copy()
         req_fmt = _extract_format(_get_content_type(h))
         res_fmt = _extract_format(_get_accept(h))
 
@@ -85,7 +138,9 @@ class SpeconnClient:
         if resp.status >= 400:
             raise _parse_error(resp)
 
-        results: list[object] = []
+        headers, trailers = _split_headers_trailers(resp.headers)
+        stream_resp = StreamResponse(headers=headers)
+
         pos = 0
         buf = resp.body
         while pos < len(buf):
@@ -97,5 +152,8 @@ class SpeconnClient:
                 if payload:
                     raise SpeconnError.decode(payload, res_fmt)
                 break
-            results.append(dispatch(res_codec, payload, res_fmt))
-        return results
+            msg = dispatch(res_codec, payload, res_fmt)
+            stream_resp._add_msg(msg)
+
+        stream_resp._set_trailers(trailers)
+        return stream_resp

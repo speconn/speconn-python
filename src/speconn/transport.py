@@ -16,6 +16,7 @@ class HttpRequest:
 @dataclasses.dataclass
 class HttpResponse:
     status: int
+    headers: list[tuple[str, str]]
     body: bytes
 
 
