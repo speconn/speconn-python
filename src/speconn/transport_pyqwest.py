@@ -1,19 +1,21 @@
 from __future__ import annotations
 
-from .transport import HttpRequest, HttpResponse
+from .transport import SpeconnMessage, HttpResponse
 
 
-class PyqwestTransport:
-    def __init__(self, client=None) -> None:
+class PyqwestChannel:
+    def __init__(self, base_url: str, client=None) -> None:
         import pyqwest
+        self._base_url = base_url.rstrip("/")
         self._client = client or pyqwest.Client()
 
-    async def send(self, request: HttpRequest) -> HttpResponse:
-        headers = {k: v for k, v in request.headers}
+    async def send(self, msg: SpeconnMessage) -> HttpResponse:
+        url = self._base_url + msg.path
+        headers = {k: v for k, v in msg.headers}
         resp = await self._client.request(
-            request.method,
-            request.url,
-            content=request.body,
+            "POST",
+            url,
+            content=msg.body,
             headers=headers,
         )
         return HttpResponse(
@@ -21,3 +23,4 @@ class PyqwestTransport:
             headers=list(resp.headers.items()),
             body=resp.content,
         )
+

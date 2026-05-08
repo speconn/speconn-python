@@ -3,6 +3,8 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
+import anyio
+
 from .abort_signal import AbortSignal
 
 
@@ -65,7 +67,7 @@ class SpeconnContext:
     async def check_cancelled(self) -> None:
         if self.is_cancelled():
             reason = self.signal.reason or "cancelled"
-            raise asyncio.CancelledError(reason)
+            raise anyio.get_cancelled_exc_class()(reason)
 
     def cleanup(self) -> None:
         self.signal.clear_timeout()
@@ -98,26 +100,14 @@ def create_context(
     )
 
 
-def create_context_from_asgi_scope(
-    scope: dict[str, Any],
+def create_context_from_headers(
+    headers: dict[str, str],
+    method_name: str,
+    local_addr: str | None = None,
+    remote_addr: str | None = None,
     timeout_ms: int | None = None,
 ) -> SpeconnContext:
-    headers: dict[str, str] = {}
-    for k, v in scope.get("headers", []):
-        headers[k.decode()] = v.decode()
-    
-    method_name = scope.get("path", "/")
-    
-    local_addr = None
-    server = scope.get("server")
-    if server:
-        local_addr = f"{server[0]}:{server[1]}"
-    
-    remote_addr = None
-    client = scope.get("client")
-    if client:
-        remote_addr = f"{client[0]}:{client[1]}"
-    
+    """Create a SpeconnContext from already-normalized headers (framework-agnostic)."""
     return create_context(
         headers=headers,
         method_name=method_name,

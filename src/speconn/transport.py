@@ -1,17 +1,13 @@
+# SpeconnChannel — send/recv
 from __future__ import annotations
-
 import dataclasses
-from abc import abstractmethod
 from typing import Protocol, runtime_checkable
 
-
 @dataclasses.dataclass
-class HttpRequest:
-    url: str
-    method: str
+class SpeconnMessage:
+    path: str
     headers: list[tuple[str, str]]
     body: bytes
-
 
 @dataclasses.dataclass
 class HttpResponse:
@@ -19,8 +15,11 @@ class HttpResponse:
     headers: list[tuple[str, str]]
     body: bytes
 
-
 @runtime_checkable
-class SpeconnTransport(Protocol):
-    @abstractmethod
-    async def send(self, request: HttpRequest) -> HttpResponse: ...
+class SpeconnChannel(Protocol):
+    async def send(self, msg: SpeconnMessage) -> None: ...
+    async def recv(self) -> bytes | None: ...
+    @property
+    def response_status(self) -> int: ...
+    @property
+    def response_headers(self) -> list[tuple[str, str]]: ...
