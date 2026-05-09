@@ -12,3 +12,14 @@ output/
 .tests-cache/
 .emit-gen/
 .emit-gen/
+*.log
+.DS_Store
+.cache/
+*.swp
+*.swo
+*~
+*.pyo
+*.egg-info/
+build/
+*.whl
+.eggs/

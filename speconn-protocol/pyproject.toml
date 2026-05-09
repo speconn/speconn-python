@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "speconn-protocol-python"
+version = "0.1.0"
+description = "Core protocol types for Speconn RPC (no HTTP dependency)"
+requires-python = ">=3.11"
+dependencies = ["specodec-runtime-python>=0.0.2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/speconn_protocol"]

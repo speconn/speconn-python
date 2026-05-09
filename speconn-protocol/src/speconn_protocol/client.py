@@ -170,6 +170,7 @@ class BidiStreamHandle(Generic[T, TRes]):
         self._req_fmt = req_fmt
         self._res_codec = res_codec
         self._res_fmt = res_fmt
+        self._gen: AsyncGenerator[TRes, None] | None = None
 
     async def send(self, req: T) -> None:
         body = respond(self._req_codec, req, self._req_fmt).body
@@ -244,7 +245,7 @@ class SpeconnClient:
         finally:
             ch.close()
 
-    async def stream(
+    async def server_stream(
         self,
         req_codec: SpecCodec,
         req,

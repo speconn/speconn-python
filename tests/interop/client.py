@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'generated'))
 
 try:
     from interop_service_client import InteropServiceClient
-    from speconn_interop_v1_types import HealthRequest, EchoRequest, DelayRequest, StreamRequest
+    from speconn_interop_v1_types import HealthRequest, EchoRequest, DelayRequest, StreamRequest, StreamRequestCodec, StreamItemCodec
 except ImportError as e:
     print(json.dumps([{"name": "import", "status": "FAIL", "detail": str(e)}]))
     sys.exit(1)
@@ -99,6 +99,23 @@ async def run(url):
         if len(items) == 3: p('gron-stream', 'PASS', f'count={len(items)}')
         else: p('gron-stream', 'FAIL')
     except Exception as e: p('gron-stream', 'FAIL', str(e)[:80])
+
+    # stream-timing: true streaming verification
+    try:
+        import time as _time
+        from speconn.client import SpeconnClient as _SC, CallOptions as _CO
+        from speconn.transport_httpx import HttpxTransport as _HT
+        _tc = _SC('/Speconn.Interop.V1.InteropService/stream-delayed', _HT(url))
+        _r = await _tc.stream(StreamRequestCodec, StreamRequest(count=5, msg_prefix='t'), StreamItemCodec, _CO(headers=[('content-type', 'application/connect+json'), ('accept', 'application/connect+json'), ('connect-protocol-version', '1')]))
+        _first = _last = None; _tcount = 0
+        async for _ in _r:
+            _now = _time.monotonic()
+            if _first is None: _first = _now
+            _last = _now; _tcount += 1
+        _elapsed = (_last - _first) * 1000 if _first and _last else 0
+        if _tcount >= 5 and _elapsed > 400: p('stream-timing', 'PASS', f'{_tcount} items, {int(_elapsed)}ms span')
+        else: p('stream-timing', 'FAIL', f'count={_tcount}, span={int(_elapsed)}ms (need >400ms)')
+    except Exception as e: p('stream-timing', 'FAIL', str(e)[:80])
 
     try:
         import httpx

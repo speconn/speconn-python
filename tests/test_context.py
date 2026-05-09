@@ -1,6 +1,6 @@
 import pytest
 import anyio
-from speconn.context import SpeconnContext, create_context, create_context_from_headers
+from speconn.context import SpeconnContext, create_context
 from speconn.abort_signal import AbortSignal, create_abort_signal_with_timeout
 from speconn.context_key import ContextKey, set_value, get_value, delete_value, UserKey, RequestIDKey, UserIDKey
 from speconn.error import Code
@@ -163,7 +163,7 @@ async def test_create_context_from_headers():
         "speconn-timeout-ms": "5000",
     }
 
-    ctx = create_context_from_headers(
+    ctx = create_context(
         headers,
         method_name="/test.Service/Method",
         local_addr="localhost:8001",

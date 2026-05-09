@@ -1,13 +1,12 @@
-# 内置 server —— 基于 asyncio，零外部依赖
 from __future__ import annotations
 
 import asyncio
 
 from .router import SpeconnRouter, SpeconnServerRequest, SpeconnServerResponse
+from .server_channel import AsyncioServerChannel
 
 
 async def listen(router: SpeconnRouter, port: int = 8080, host: str = "127.0.0.1") -> None:
-    """用 asyncio 启动一个最小 HTTP/1.1 server。零框架依赖。"""
 
     async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         try:
@@ -32,24 +31,28 @@ async def listen(router: SpeconnRouter, port: int = 8080, host: str = "127.0.0.1
         path = parts[1]
 
         headers: dict[str, str] = {}
-        content_length = 0
         for line in lines[1:]:
             if ":" in line:
                 k, v = line.split(":", 1)
                 headers[k.strip().lower()] = v.strip()
+
+        content_length = 0
         try:
             content_length = int(headers.get("content-length", "0"))
         except ValueError:
             pass
 
-        body = b""
         if content_length > 0:
             already = raw.split(b"\r\n\r\n", 1)
             if len(already) > 1:
-                body = already[1]
-            remaining = content_length - len(body)
+                body_data = already[1]
+            else:
+                body_data = b""
+            remaining = content_length - len(body_data)
             if remaining > 0:
-                body += await reader.readexactly(remaining)
+                body_data += await reader.readexactly(remaining)
+        else:
+            body_data = b""
 
         if method == "OPTIONS":
             writer.write(b"HTTP/1.1 204 No Content\r\n\r\n")
@@ -59,7 +62,7 @@ async def listen(router: SpeconnRouter, port: int = 8080, host: str = "127.0.0.1
         remote_addr = writer.get_extra_info("peername")
         remote = f"{remote_addr[0]}:{remote_addr[1]}" if remote_addr else None
 
-        req = SpeconnServerRequest(path=path, headers=headers, body=body, remote_addr=remote)
+        req = SpeconnServerRequest(path=path, headers=headers, body=body_data, remote_addr=remote)
         resp = await router.handle(req)
 
         status_text = {200: "OK", 400: "Bad Request", 404: "Not Found", 500: "Internal Server Error"}.get(resp.status, "OK")

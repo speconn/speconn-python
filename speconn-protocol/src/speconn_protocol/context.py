@@ -3,7 +3,6 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-import anyio
 from .abort_signal import AbortSignal
 
 
@@ -61,10 +60,10 @@ class SpeconnContext:
     def is_cancelled(self) -> bool:
         return self.signal.is_cancelled
 
-    async def check_cancelled(self) -> None:
+    def check_cancelled(self) -> None:
         if self.is_cancelled():
             reason = self.signal.reason or "cancelled"
-            raise anyio.get_cancelled_exc_class()(reason)
+            raise RuntimeError(reason)
 
     def cleanup(self) -> None:
         self.signal.cleanup()

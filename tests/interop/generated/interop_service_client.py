@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 from typing import Any
-from speconn import SpeconnClient, SpeconnChannel, CallOptions, Response, StreamResponse
+from speconn import SpeconnClient, HttpxTransport, SpeconnTransport, CallOptions, Response, StreamResponse
 from speconn_interop_v1_types import *
 
 class InteropServiceClient:
-    def __init__(self, base_url: str, transport: SpeconnChannel | None = None) -> None:
-        self._health = SpeconnClient(base_url, "/Speconn.Interop.V1.InteropService/health", transport)
-        self._echo = SpeconnClient(base_url, "/Speconn.Interop.V1.InteropService/echo", transport)
-        self._delay = SpeconnClient(base_url, "/Speconn.Interop.V1.InteropService/delay", transport)
-        self._stream = SpeconnClient(base_url, "/Speconn.Interop.V1.InteropService/stream", transport)
+    def __init__(self, base_url: str, transport: SpeconnTransport | None = None) -> None:
+        _t = transport or HttpxTransport(base_url)
+        self._health = SpeconnClient("/Speconn.Interop.V1.InteropService/health", _t)
+        self._echo = SpeconnClient("/Speconn.Interop.V1.InteropService/echo", _t)
+        self._delay = SpeconnClient("/Speconn.Interop.V1.InteropService/delay", _t)
+        self._stream = SpeconnClient("/Speconn.Interop.V1.InteropService/stream", _t)
     async def health(self, req: HealthRequest, *, headers: dict[str, str] | None = None, timeout_ms: int | None = None) -> Response[HealthResponse]:
-        return await self._health.call(HealthRequestCodec, req, HealthResponseCodec, CallOptions(headers=headers or {}, timeout_ms=timeout_ms))
+        return await self._health.call(HealthRequestCodec, req, HealthResponseCodec, CallOptions(headers=list((headers or {}).items()), timeout_ms=timeout_ms))
     async def echo(self, req: EchoRequest, *, headers: dict[str, str] | None = None, timeout_ms: int | None = None) -> Response[EchoResponse]:
-        return await self._echo.call(EchoRequestCodec, req, EchoResponseCodec, CallOptions(headers=headers or {}, timeout_ms=timeout_ms))
+        return await self._echo.call(EchoRequestCodec, req, EchoResponseCodec, CallOptions(headers=list((headers or {}).items()), timeout_ms=timeout_ms))
     async def delay(self, req: DelayRequest, *, headers: dict[str, str] | None = None, timeout_ms: int | None = None) -> Response[DelayResponse]:
-        return await self._delay.call(DelayRequestCodec, req, DelayResponseCodec, CallOptions(headers=headers or {}, timeout_ms=timeout_ms))
+        return await self._delay.call(DelayRequestCodec, req, DelayResponseCodec, CallOptions(headers=list((headers or {}).items()), timeout_ms=timeout_ms))
     async def stream(self, req: StreamRequest, *, headers: dict[str, str] | None = None, timeout_ms: int | None = None) -> StreamResponse[StreamItem]:
-        return await self._stream.stream(StreamRequestCodec, req, StreamItemCodec, CallOptions(headers=headers or {}, timeout_ms=timeout_ms))
+        return await self._stream.stream(StreamRequestCodec, req, StreamItemCodec, CallOptions(headers=list((headers or {}).items()), timeout_ms=timeout_ms))

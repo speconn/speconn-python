@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, AsyncIterator
 from typing import Protocol
 
 from specodec import SpecCodec, dispatch, respond
